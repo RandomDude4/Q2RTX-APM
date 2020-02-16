@@ -55,7 +55,7 @@ get_primary_ray(vec2 screen_pos)
 	ray.origin = global_ubo.cam_pos.xyz;
 	ray.direction = view_dir;
 	ray.t_min = 0;
-	ray.t_max = 10000;
+	ray.t_max = PRIMARY_RAY_T_MAX;
 	return ray;
 }
 
