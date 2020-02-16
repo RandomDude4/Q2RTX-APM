@@ -52,13 +52,7 @@ get_primary_ray(vec2 screen_pos)
 		vec3 up = global_ubo.invV[1].xyz;
 		vec3 forward = global_ubo.invV[2].xyz;
 
-		// Find the intersection of the focal plane with the ray.
-
-		float distance = global_ubo.pt_focus / dot(view_dir, forward);
-		vec3 focal_point = view_dir * distance;
-
 		// Offset the ray origin in the focal plane to simulate aperture.
-
 		vec2 uv = vec2(get_rng(RNG_PRIMARY_APERTURE_X), get_rng(RNG_PRIMARY_APERTURE_Y));
 		vec2 planar_offset;
 
@@ -82,8 +76,25 @@ get_primary_ray(vec2 screen_pos)
 			planar_offset = bary.x * v1 + bary.y * v2; // + bary.z * v0, where v0 is (0, 0)
 		}
 
+		// Find the intersection of the focal plane with the ray.
 		planar_offset *= global_ubo.pt_aperture;
-		vec3 offset = planar_offset.x * right + planar_offset.y * up;
+		float distance;
+		vec3 offset;
+		if (global_ubo.pt_projection == 0)	// if rectilinear use simple flat focus plane
+		{
+			distance = global_ubo.pt_focus / dot(view_dir, forward);	// Distance in forward direction
+			offset = planar_offset.x * right + planar_offset.y * up;
+		}
+		else	// if other projection use curved focus plane
+		{
+			distance = global_ubo.pt_focus;	// Total distance
+				
+			#define ray_right cross(view_dir, up)
+			#define ray_up cross(view_dir, ray_right)
+			offset = planar_offset.x*ray_right + planar_offset.y*ray_up;	// Offset should be perpendicular to ray direction (not view direction) to work for large fov
+		}
+		
+		vec3 focal_point = view_dir * distance;
 
 		ray.origin = offset;
 		ray.direction = normalize(focal_point - ray.origin);
