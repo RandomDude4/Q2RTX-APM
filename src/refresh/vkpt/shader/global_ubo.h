@@ -115,7 +115,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 	UBO_CVAR_DO(tm_slope_blur_sigma, 12.0) /* sigma for Gaussian blur of tone curve slopes, (0..inf) */ \
 	UBO_CVAR_DO(tm_white_point, 10.0) /* how bright colors can be before they become white, (0..inf) */ \
 
-    
+    // Need to be multiple of 4x32bit in total (cannot add just one element)
 #define GLOBAL_UBO_VAR_LIST \
 	GLOBAL_UBO_VAR_LIST_DO(int,             current_frame_idx) \
 	GLOBAL_UBO_VAR_LIST_DO(int,             width) \
@@ -177,9 +177,9 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 	GLOBAL_UBO_VAR_LIST_DO(float,           inv_height)\
 	\
 	GLOBAL_UBO_VAR_LIST_DO(float,           prev_adapted_luminance) \
-	GLOBAL_UBO_VAR_LIST_DO(float,           padding1) \
-	GLOBAL_UBO_VAR_LIST_DO(float,           padding2) \
-	GLOBAL_UBO_VAR_LIST_DO(float,           padding3) \
+	GLOBAL_UBO_VAR_LIST_DO(int,           	pt_projection) \
+	GLOBAL_UBO_VAR_LIST_DO(int,           	pt_projection_fov) \
+	GLOBAL_UBO_VAR_LIST_DO(float,           projection_aspect_ratio) \
 	\
 	GLOBAL_UBO_VAR_LIST_DO(vec4,            world_center) \
 	GLOBAL_UBO_VAR_LIST_DO(vec4,            world_size) \

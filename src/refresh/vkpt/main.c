@@ -54,6 +54,7 @@ cvar_t *cvar_pt_enable_nodraw = NULL;
 cvar_t *cvar_pt_accumulation_rendering = NULL;
 cvar_t *cvar_pt_accumulation_rendering_framenum = NULL;
 cvar_t *cvar_pt_projection = NULL;
+cvar_t *cvar_pt_projection_fov = NULL;		// Added FOV cvar for custom projections
 cvar_t *cvar_pt_dof = NULL;
 cvar_t *cvar_pt_freecam = NULL;
 cvar_t *cvar_drs_enable = NULL;
@@ -2078,6 +2079,9 @@ prepare_ubo(refdef_t *fd, mleaf_t* viewleaf, const reference_mode_t* ref_mode, c
 	inverse(V, ubo->invV);
 	inverse(P, ubo->invP);
 
+	ubo->pt_projection = cvar_pt_projection->integer;		// pt_projection into global UBO register (global_ubo.h) so it can be accessed in projection.glsl
+	ubo->pt_projection_fov = cvar_pt_projection_fov->integer;		
+
 	if (cvar_pt_projection->integer == 1 && render_world)
 	{
 		float rad_per_pixel = atanf(tanf(fd->fov_y * M_PI / 360.0f) / ((float)qvk.extent_unscaled.height * 0.5f));
@@ -2155,12 +2159,6 @@ prepare_ubo(refdef_t *fd, mleaf_t* viewleaf, const reference_mode_t* ref_mode, c
 		case 1: enable_dof = ref_mode->enable_accumulation; break;
 		case 2: enable_dof = !ref_mode->enable_denoiser; break;
 		default: enable_dof = qtrue; break;
-		}
-
-		if (cvar_pt_projection->integer != 0)
-		{
-			// DoF does not make physical sense with the cylindrical projection
-			enable_dof = qfalse;
 		}
 
 		if (!enable_dof)
@@ -2894,6 +2892,10 @@ R_Init_RTX(qboolean total)
 	// 0 -> perspective, 1 -> cylindrical
 	cvar_pt_projection = Cvar_Get("pt_projection", "0", CVAR_ARCHIVE);
 
+	// FOV for custom projections
+	cvar_pt_projection_fov = Cvar_Get("pt_projection_fov", "180", CVAR_ARCHIVE);
+
+
 	// depth of field control:
 	// 0 -> disabled
 	// 1 -> enabled only in the reference mode
@@ -2945,6 +2947,7 @@ R_Init_RTX(qboolean total)
 	cvar_pt_focus->changed = accumulation_cvar_changed;
     cvar_pt_freecam->changed = accumulation_cvar_changed;
 	cvar_pt_projection->changed = accumulation_cvar_changed;
+	cvar_pt_projection_fov->changed = accumulation_cvar_changed;
 
 	cvar_pt_num_bounce_rays->flags |= CVAR_ARCHIVE;
 
