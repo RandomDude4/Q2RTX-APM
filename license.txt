@@ -1,5 +1,6 @@
 
-Copyright (c) 2019, NVIDIA CORPORATION.  All rights reserved.
+Copyright (c) 2020 Richard Andersson
+Copyright (c) 2019 NVIDIA CORPORATION.  All rights reserved.
 Copyright (c) 2018 Christoph Schied
 Copyright (C) 2018 Florian Simon
 Copyright (C) 2018 Tobias Zirr
@@ -19,7 +20,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 Source code is available at the following location: 
-    https://github.com/NVIDIA/Q2RTX
+    https://github.com/RandomDude4/Q2RTX-APM
     
 
                     GNU GENERAL PUBLIC LICENSE
