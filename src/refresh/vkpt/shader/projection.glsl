@@ -16,16 +16,13 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 
-
 // Testing of panini... replace with fov cvar
 #define fovx 180
-
-
-
 
 // Forward transforms are used to calculate a known ray direction to a screen position (only used for temporal denoising etc.)
 // Reverse transforms are used to get a ray direction from a screen position (used for the main path tracing)
 
+// Conversion from direction vector to angular values in radians and the other way around
 void view_to_latlon(vec3 view, out float lat, out float lon)
 {
    lon = atan(view.x, view.z);
@@ -34,16 +31,50 @@ void view_to_latlon(vec3 view, out float lat, out float lon)
 
 void latlon_to_view(float lat, float lon, out vec3 view)
 {
-   float clat = cos(lat);
-   view.x = sin(lon)*clat;
+   view.x = sin(lon)*cos(lat);
    view.y = -sin(lat);
-   view.z = cos(lon)*clat;
+   view.z = cos(lon)*cos(lat);
+}
+
+vec2 fov_to_scale()
+{
+	vec2 scale;
+	float aspect = global_ubo.projection_aspect_ratio;
+	float fov = global_ubo.pt_projection_fov * M_PI/180.0;		// Convert to radians
+	int projection_type = global_ubo.pt_projection;
+	
+	if (fov == 0)
+	{
+		scale = vec2(1.0, 1.0);
+		return scale;
+	}
+
+	switch(projection_type)
+	{
+	default:
+	case 0:	// Rectilinear
+		scale.x = tan(fov/2.0);
+		scale.y = tan(fov/2.0) / aspect;
+		return scale;
+	case 1:	// Cylindrical
+		#define progressive 3.0		// Absolute min 2.0 to work up to 360 deg hfov (prefferably more than 2.0)
+		scale.x = fov/2.0;
+		scale.y = tan(fov/2.0/progressive) * progressive / aspect;
+		return scale;
+	case 2:
+		return vec2(1,1);
+	case 3:
+		return vec2(1,1);
+	case 4:
+		return vec2(1,1);
+	case 5:
+		return vec2(1,1);
+	}
 }
 							   
-
 // ---------- Rectilinear transforms ----------
 												  
-
+/*
 bool rectilinear_forward(vec3 view_pos, out vec2 screen_pos, out float distance, bool previous)
 {
 	vec4 clip_pos;
@@ -70,39 +101,83 @@ vec3 rectlinear_reverse(vec2 screen_pos, float distance, bool previous)
 				
 	return view_dir * distance;
 }
+*/
+
+bool rectilinear_forward(vec3 view_pos, out vec2 screen_pos, out float distance, bool previous)
+{
+	distance = length(view_pos);
+	view_pos = normalize(view_pos);
+	vec2 scale = fov_to_scale();
+
+	float x = view_pos.x;
+	float y = -view_pos.y;
+	float z = view_pos.z;
+	float theta = acos(z);
+
+	if (theta == 0.0)
+	{ 	screen_pos = vec2(0.5, 0.5); }
+	else
+	{
+		float r = tan(theta);
+		float c = r/sqrt(x*x+y*y);
+		screen_pos.x = (x*c/scale.x + 1.0) / 2.0;
+		screen_pos.y = (y*c/scale.y + 1.0) / 2.0;
+	}
+
+	return screen_pos.y > 0 && screen_pos.y < 1 && screen_pos.x > 0 && screen_pos.x < 1 && view_pos.z > 0;
+}
+
+vec3 rectlinear_reverse(vec2 screen_pos, float distance, bool previous)
+{
+	vec3 view_dir;
+	vec2 scale = fov_to_scale();
+	float x = (screen_pos.x * 2.0 - 1.0) * scale.x;
+	float y = (screen_pos.y * 2.0 - 1.0) * scale.y;
+
+	float r = sqrt(x*x+y*y);
+	float theta = atan(r);
+	float s = sin(theta);
+
+	view_dir.x = x/r*s;
+	view_dir.y = -y/r*s;
+	view_dir.z = cos(theta);
+	view_dir = normalize(view_dir);
+
+	return view_dir * distance;
+}
+
 
 // ---------- Cylindrical transforms ----------
-bool cylindrical_forward(vec3 view_pos, out vec2 screen_pos, out float distance, bool previous, float cylindrical_hfov)
+bool cylindrical_forward(vec3 view_pos, out vec2 screen_pos, out float distance, bool previous)
 {
-	float y = view_pos.y / length(view_pos.xz);
-	if(previous)
-		y *= global_ubo.P_prev[1][1];
-	else
-		y *= global_ubo.P[1][1];
-	screen_pos.y = y * 0.5 + 0.5;
-
-	float angle = atan(view_pos.x, view_pos.z);
-	screen_pos.x = (angle / cylindrical_hfov) + 0.5;
-
+	vec2 scale = fov_to_scale();
+	float lat, lon;
 	distance = length(view_pos);
+	view_pos = normalize(view_pos);
+
+	view_to_latlon(view_pos, lat, lon);
+
+	float x = lon;
+	float y = tan(lat);
+	
+	screen_pos.x = (x/scale.x + 1.0) / 2.0;
+	screen_pos.y = (y/scale.y + 1.0) / 2.0;
 
 	return screen_pos.y > 0 && screen_pos.y < 1 && screen_pos.x > 0 && screen_pos.x < 1;
 }
 
-vec3 cylindrical_reverse(vec2 screen_pos, float distance, bool previous, float cylindrical_hfov)
+vec3 cylindrical_reverse(vec2 screen_pos, float distance, bool previous)
 {
-	vec4 clip_pos = vec4(0, screen_pos.y * 2.0 - 1.0, 1, 1);
 	vec3 view_dir;
-	if(previous)
-		view_dir.y = (global_ubo.invP_prev * clip_pos).y;
-	else
-		view_dir.y = (global_ubo.invP * clip_pos).y;
+	vec2 scale = fov_to_scale();
 
-	float xangle = (screen_pos.x - 0.5) * cylindrical_hfov;
-	view_dir.x = sin(xangle);
-	view_dir.z = cos(xangle);
+	float x = (screen_pos.x * 2.0 - 1.0) * scale.x;
+	float y = (screen_pos.y * 2.0 - 1.0) * scale.y;
 
-	view_dir = normalize(view_dir);
+	float lon = x;
+	float lat = atan(y);
+
+	latlon_to_view(lat, lon, view_dir);
 
 	return view_dir * distance;
 }
@@ -111,12 +186,14 @@ vec3 cylindrical_reverse(vec2 screen_pos, float distance, bool previous, float c
 bool equirectangular_forward(vec3 view_pos, out vec2 screen_pos, out float distance)
 {
 	float lat, lon;
+	distance = length(view_pos);
+	view_pos = normalize(view_pos);
+
 	view_to_latlon(view_pos, lat, lon);
 	
 	screen_pos.x = (lon / M_PI)*0.5 + 0.5;
 	screen_pos.y = (lat / (M_PI/2))*0.5 + 0.5;
 
-	distance = length(view_pos);
 	return false;
 }
 
@@ -136,13 +213,15 @@ bool mercator_forward(vec3 view_pos, out vec2 screen_pos, out float distance)
 {
 	vec2 scale = vec2(M_PI, M_PI/2);			// FOV
 	float lat, lon;
+	distance = length(view_pos);
+	view_pos = normalize(view_pos);
+
 	view_to_latlon(view_pos, lat, lon);
 	screen_pos.x = lon;
 	screen_pos.y = log(tan(M_PI*0.25 + lat*0.5));
 
 	screen_pos = screen_pos / scale *0.5 + 0.5;
 
-	distance = length(view_pos);
 	return false;
 }
 
@@ -151,8 +230,6 @@ vec3 mercator_reverse(vec2 screen_pos, float distance)
 	vec2 scale = vec2(M_PI, M_PI/2);
 	vec3 view_dir;
 	vec2 pos = (screen_pos * 2 - 1) * scale;
-	//float x = (screen_pos.x * 2 - 1) * M_PI;
-	//float y = (screen_pos.y * 2 - 1) * M_PI/2;
 
 	float lon = pos.x;
 	float lat = atan(sinh(pos.y));
@@ -175,7 +252,7 @@ vec3 hammer_reverse(vec2 screen_pos, float distance)
 	
 	if (x*x + y*y > 1) {
 		//discard;					// Doesn't work
-		return vec3(0, 1, 0); 		//TODO set to black, now everyting outside dome is pointing up to ceiling
+		return vec3(0, 0, 0); 		//TODO set to black, now everyting outside reflects sky color
 	}
 	
 	view_dir.y = -sin(latitude)*view_dir.z;
@@ -204,7 +281,7 @@ vec3 get_panini_reverse(vec2 screen_pos, float scale, float distance)
 	screen_pos = (screen_pos * 2 - 1) * scale;
 	
 	float x = screen_pos.x;
-	float y = screen_pos.y/*FIXME *fovy/fovx*/;
+	float y = screen_pos.y;
 	float d = distance;
 
 	float k = x*x/((d+1)*(d+1));
@@ -221,11 +298,12 @@ vec3 get_panini_reverse(vec2 screen_pos, float scale, float distance)
 	return view_dir * distance;
 }
 
-// ---------- Ray Direction to Screen Position ----------
+// ---------- Temporal Filtering: Ray Direction to Screen Position ----------
 bool projection_view_to_screen(vec3 view_pos, out vec2 screen_pos, out float distance, bool previous)
 {
-	float cylindrical_hfov = previous ? global_ubo.cylindrical_hfov_prev : global_ubo.cylindrical_hfov;
 	int projection_type = global_ubo.pt_projection;
+	float aspect = global_ubo.projection_aspect_ratio;
+	float fov = global_ubo.pt_projection_fov * M_PI/180;		// Convert to radians
 
 	if (projection_type > 3) 		// Replace by direct access to "pt_projection" console variable (not global, have to figure out of to access)
 		{ projection_type = 1; }
@@ -235,7 +313,7 @@ bool projection_view_to_screen(vec3 view_pos, out vec2 screen_pos, out float dis
 	case 0:	// Rectilinear
 		return rectilinear_forward(view_pos, screen_pos, distance, previous);
 	case 1:	// Cylindrical
-		return cylindrical_forward(view_pos, screen_pos, distance, previous, cylindrical_hfov);
+		return cylindrical_forward(view_pos, screen_pos, distance, previous);
 	case 2:
 		return equirectangular_forward(view_pos, screen_pos, distance);
 	case 3:
@@ -247,18 +325,20 @@ bool projection_view_to_screen(vec3 view_pos, out vec2 screen_pos, out float dis
 	}
 }
 
-// ---------- Screen Position to Ray Direction----------
+// ---------- Rendering: Screen Position to Ray Direction----------
 vec3 projection_screen_to_view(vec2 screen_pos, float distance, bool previous)
 {
-	float cylindrical_hfov = previous ? global_ubo.cylindrical_hfov_prev : global_ubo.cylindrical_hfov;
 	int projection_type = global_ubo.pt_projection;
+	float aspect = global_ubo.projection_aspect_ratio;
+	float fov = global_ubo.pt_projection_fov * M_PI/180;		// Convert to radians
 
 	switch(projection_type)
 	{
+	default:
 	case 0:
 		return rectlinear_reverse(screen_pos, distance, previous);
 	case 1:
-		return cylindrical_reverse(screen_pos, distance, previous, cylindrical_hfov);
+		return cylindrical_reverse(screen_pos, distance, previous);
 	case 2:
 		return equirectangular_reverse(screen_pos, distance);
 	case 3:

@@ -2081,6 +2081,8 @@ prepare_ubo(refdef_t *fd, mleaf_t* viewleaf, const reference_mode_t* ref_mode, c
 
 	ubo->pt_projection = cvar_pt_projection->integer;		// pt_projection into global UBO register (global_ubo.h) so it can be accessed in projection.glsl
 	ubo->pt_projection_fov = cvar_pt_projection_fov->integer;		
+	ubo->projection_aspect_ratio = (float) r_config.width/ (float) r_config.height;
+		//Com_Printf("Aspect %f\n", ubo->projection_aspect_ratio);		// Debugging
 
 	if (cvar_pt_projection->integer == 1 && render_world)
 	{
