@@ -43,7 +43,10 @@ vec2 fov_to_scale()
 	float fov = global_ubo.pt_projection_fov * M_PI/180.0;		// Convert to radians
 	int projection_type = global_ubo.pt_projection;
 	
-	if (fov == 0)
+	#define weight_start M_PI/2
+
+
+	if (fov == 0)		// If FOV is set to 0, use default FOV
 	{
 		scale = vec2(1.0, 1.0);
 		return scale;
@@ -56,17 +59,40 @@ vec2 fov_to_scale()
 		scale.x = tan(fov/2.0);
 		scale.y = tan(fov/2.0) / aspect;
 		return scale;
+
 	case 1:	// Cylindrical
 		#define progressive 3.0		// Absolute min 2.0 to work up to 360 deg hfov (prefferably more than 2.0)
 		scale.x = fov/2.0;
+		//scale.y = tan(fov/2.0) / aspect;		// Only works up to FOV = ca 160 deg vertical)
 		scale.y = tan(fov/2.0/progressive) * progressive / aspect;
 		return scale;
-	case 2:
-		return vec2(1,1);
+
+	case 2:	// Equirectangular
+		// scale = vec2(M_PI, M_PI/2);	// Full projection
+		scale.x = fov/2.0;
+		if (fov < weight_start)
+		{	scale.y = (fov/2.0) / aspect; }
+		else
+		{ 
+			//scale.y = (fov/2.0) / (cos((fov - M_PI/2)/4*M_PI/8)*(aspect - 2) + 2); 
+			scale.y = (fov/2.0) / (  (fov - weight_start)/(2*M_PI-weight_start) * (2 - aspect) + aspect  );
+		}
+		return scale;
+
 	case 3:
-		return vec2(1,1);
+		// vec2 scale = vec2(M_PI, M_PI/2);	// Full projection
+		scale.x = fov/2.0;
+		if (fov < M_PI/2)
+			{ scale.y = (fov/2.0) / aspect; }
+		else
+		{
+			scale.y = (fov/2.0) / (  (fov - weight_start)/(2*M_PI-weight_start) * (2 - aspect) + aspect  );
+		}
+		return scale;
+
 	case 4:
 		return vec2(1,1);
+
 	case 5:
 		return vec2(1,1);
 	}
@@ -75,6 +101,7 @@ vec2 fov_to_scale()
 // ---------- Rectilinear transforms ----------
 												  
 /*
+// Original rectilinear functions (works with build-in "fov" command which assumes 4:3 aspect ratio among other things)
 bool rectilinear_forward(vec3 view_pos, out vec2 screen_pos, out float distance, bool previous)
 {
 	vec4 clip_pos;
@@ -105,9 +132,9 @@ vec3 rectlinear_reverse(vec2 screen_pos, float distance, bool previous)
 
 bool rectilinear_forward(vec3 view_pos, out vec2 screen_pos, out float distance, bool previous)
 {
+	vec2 scale = fov_to_scale();
 	distance = length(view_pos);
 	view_pos = normalize(view_pos);
-	vec2 scale = fov_to_scale();
 
 	float x = view_pos.x;
 	float y = -view_pos.y;
@@ -129,8 +156,9 @@ bool rectilinear_forward(vec3 view_pos, out vec2 screen_pos, out float distance,
 
 vec3 rectlinear_reverse(vec2 screen_pos, float distance, bool previous)
 {
-	vec3 view_dir;
 	vec2 scale = fov_to_scale();
+	vec3 view_dir;
+
 	float x = (screen_pos.x * 2.0 - 1.0) * scale.x;
 	float y = (screen_pos.y * 2.0 - 1.0) * scale.y;
 
@@ -153,7 +181,7 @@ bool cylindrical_forward(vec3 view_pos, out vec2 screen_pos, out float distance,
 	vec2 scale = fov_to_scale();
 	float lat, lon;
 	distance = length(view_pos);
-	view_pos = normalize(view_pos);
+	// view_pos = normalize(view_pos);
 
 	view_to_latlon(view_pos, lat, lon);
 
@@ -168,8 +196,8 @@ bool cylindrical_forward(vec3 view_pos, out vec2 screen_pos, out float distance,
 
 vec3 cylindrical_reverse(vec2 screen_pos, float distance, bool previous)
 {
-	vec3 view_dir;
 	vec2 scale = fov_to_scale();
+	vec3 view_dir;
 
 	float x = (screen_pos.x * 2.0 - 1.0) * scale.x;
 	float y = (screen_pos.y * 2.0 - 1.0) * scale.y;
@@ -185,23 +213,24 @@ vec3 cylindrical_reverse(vec2 screen_pos, float distance, bool previous)
 // ---------- Equirectangular transforms ----------
 bool equirectangular_forward(vec3 view_pos, out vec2 screen_pos, out float distance)
 {
+	vec2 scale = fov_to_scale();
 	float lat, lon;
 	distance = length(view_pos);
-	view_pos = normalize(view_pos);
+	// view_pos = normalize(view_pos);
 
 	view_to_latlon(view_pos, lat, lon);
 	
-	screen_pos.x = (lon / M_PI)*0.5 + 0.5;
-	screen_pos.y = (lat / (M_PI/2))*0.5 + 0.5;
+	screen_pos.x = (lon / scale.x)*0.5 + 0.5;
+	screen_pos.y = (lat / scale.y)*0.5 + 0.5;
 
 	return false;
 }
 
 vec3 equirectangular_reverse(vec2 screen_pos, float distance)
 {
-	//vec3 view_dir = vec3(0, 0, 1);
+	vec2 scale = fov_to_scale();
 	vec3 view_dir;
-	vec2 angle = (screen_pos * 2 - 1) * vec2(M_PI, M_PI/2);			// Change FOV, change the PI values
+	vec2 angle = (screen_pos * 2 - 1) * scale;			// Change FOV, change the PI values
 	
 	latlon_to_view(angle.y, angle.x, view_dir);
 	
@@ -211,7 +240,7 @@ vec3 equirectangular_reverse(vec2 screen_pos, float distance)
 // ---------- Mercator transforms ----------
 bool mercator_forward(vec3 view_pos, out vec2 screen_pos, out float distance)
 {
-	vec2 scale = vec2(M_PI, M_PI/2);			// FOV
+	vec2 scale = fov_to_scale();
 	float lat, lon;
 	distance = length(view_pos);
 	view_pos = normalize(view_pos);
@@ -227,7 +256,7 @@ bool mercator_forward(vec3 view_pos, out vec2 screen_pos, out float distance)
 
 vec3 mercator_reverse(vec2 screen_pos, float distance)
 {
-	vec2 scale = vec2(M_PI, M_PI/2);
+	vec2 scale = fov_to_scale();
 	vec3 view_dir;
 	vec2 pos = (screen_pos * 2 - 1) * scale;
 
