@@ -16,8 +16,10 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 
-// Testing of panini... replace with fov cvar
-#define fovx 180
+
+#define fovx 180			// Panini fovx
+#define angleScale 0.5		// Steregraphic constant
+
 
 // Forward transforms are used to calculate a known ray direction to a screen position (only used for temporal denoising etc.)
 // Reverse transforms are used to get a ray direction from a screen position (used for the main path tracing)
@@ -43,7 +45,7 @@ vec2 fov_to_scale()
 	float fov = global_ubo.pt_projection_fov * M_PI/180.0;		// Convert to radians
 	int projection_type = global_ubo.pt_projection;
 	
-	#define weight_start M_PI/2
+	#define weight_start M_PI/2		// Starting point for non-linear scaling of vfov
 
 
 	if (fov == 0)		// If FOV is set to 0, use default FOV
@@ -79,7 +81,7 @@ vec2 fov_to_scale()
 		}
 		return scale;
 
-	case 3:
+	case 3:	// Mercator
 		// vec2 scale = vec2(M_PI, M_PI/2);	// Full projection
 		scale.x = fov/2.0;
 		if (fov < M_PI/2)
@@ -90,8 +92,11 @@ vec2 fov_to_scale()
 		}
 		return scale;
 
-	case 4:
-		return vec2(1,1);
+	case 4:	// Stereographic
+		scale.x = tan(fov/2 * angleScale);
+		scale.y = tan(fov/2 * angleScale) / aspect;
+		
+		return scale;
 
 	case 5:
 		return vec2(1,1);
@@ -169,7 +174,6 @@ vec3 rectlinear_reverse(vec2 screen_pos, float distance, bool previous)
 	view_dir.x = x/r*s;
 	view_dir.y = -y/r*s;
 	view_dir.z = cos(theta);
-	view_dir = normalize(view_dir);
 
 	return view_dir * distance;
 }
@@ -181,7 +185,7 @@ bool cylindrical_forward(vec3 view_pos, out vec2 screen_pos, out float distance,
 	vec2 scale = fov_to_scale();
 	float lat, lon;
 	distance = length(view_pos);
-	// view_pos = normalize(view_pos);
+	view_pos = normalize(view_pos);
 
 	view_to_latlon(view_pos, lat, lon);
 
@@ -216,14 +220,14 @@ bool equirectangular_forward(vec3 view_pos, out vec2 screen_pos, out float dista
 	vec2 scale = fov_to_scale();
 	float lat, lon;
 	distance = length(view_pos);
-	// view_pos = normalize(view_pos);
+	view_pos = normalize(view_pos);
 
 	view_to_latlon(view_pos, lat, lon);
 	
 	screen_pos.x = (lon / scale.x)*0.5 + 0.5;
 	screen_pos.y = (lat / scale.y)*0.5 + 0.5;
 
-	return false;
+	return screen_pos.y > 0 && screen_pos.y < 1 && screen_pos.x > 0 && screen_pos.x < 1;
 }
 
 vec3 equirectangular_reverse(vec2 screen_pos, float distance)
@@ -251,7 +255,7 @@ bool mercator_forward(vec3 view_pos, out vec2 screen_pos, out float distance)
 
 	screen_pos = screen_pos / scale *0.5 + 0.5;
 
-	return false;
+	return screen_pos.y > 0 && screen_pos.y < 1 && screen_pos.x > 0 && screen_pos.x < 1;
 }
 
 vec3 mercator_reverse(vec2 screen_pos, float distance)
@@ -267,31 +271,53 @@ vec3 mercator_reverse(vec2 screen_pos, float distance)
 	return view_dir * distance;
 }
 
-// ---------- Hammer transforms ----------
-	// http://paulbourke.net/geometry/transformationprojection/
-vec3 hammer_reverse(vec2 screen_pos, float distance)
+// ---------- Stereographic ----------
+bool stereographic_forward(vec3 view_pos, out vec2 screen_pos, out float distance)
 {
-	vec3 view_dir = vec3(0, 0, 1);
-	
-	float x = (screen_pos.x * 2 - 1);
-	float y = (screen_pos.y * 2 - 1);
-	float z = sqrt(1 - x * x / 2 - y * y / 2);
-	float longitude = 2 * atan((sqrt(2.0) * z * x)/(2 * z * z - 1));
-	float latitude = asin(sqrt(2.0) * z * y);
-	
-	if (x*x + y*y > 1) {
-		//discard;					// Doesn't work
-		return vec3(0, 0, 0); 		//TODO set to black, now everyting outside reflects sky color
+	vec2 scale = fov_to_scale();
+	distance = length(view_pos);
+	view_pos = normalize(view_pos);
+
+	float x = view_pos.x;
+	float y = -view_pos.y;
+	float z = view_pos.z;
+
+	float theta = acos(z);
+	if (theta == 0.0)
+	{ 	screen_pos = vec2(0.5, 0.5); }
+	else
+	{
+		float r = tan(theta*angleScale);
+		float c = r/sqrt(x*x+y*y);
+
+		screen_pos.x = x*c;
+		screen_pos.y = y*c;
 	}
+
+	screen_pos = screen_pos / scale *0.5 + 0.5;
+
+	return screen_pos.y > 0 && screen_pos.y < 1 && screen_pos.x > 0 && screen_pos.x < 1;
+}
+
+vec3 stereographic_reverse(vec2 screen_pos, float distance)
+{
+	vec2 scale = fov_to_scale();
+	vec3 view_dir;
 	
-	view_dir.y = -sin(latitude)*view_dir.z;
-	view_dir.z = cos(latitude)*view_dir.z;
-	
-	view_dir.x = sin(longitude)*view_dir.z;
-	view_dir.z = cos(longitude)*view_dir.z;
-	
+	float x = (screen_pos.x * 2.0 - 1.0) * scale.x;
+	float y = (screen_pos.y * 2.0 - 1.0) * scale.y;
+
+	float r = sqrt(x*x+y*y);
+	float theta = atan(r)/angleScale;
+	float s = sin(theta);
+
+	view_dir.x = x/r*s;
+	view_dir.y = -y/r*s;
+	view_dir.z = cos(theta);
+
 	return view_dir * distance;
 }
+
 
 // ---------- Panini transforms ----------
 	// http://github.com/shaunlebron/flex-fov
@@ -327,6 +353,34 @@ vec3 get_panini_reverse(vec2 screen_pos, float scale, float distance)
 	return view_dir * distance;
 }
 
+
+// ---------- Hammer transforms ----------
+	// http://paulbourke.net/geometry/transformationprojection/
+vec3 hammer_reverse(vec2 screen_pos, float distance)
+{
+	vec3 view_dir = vec3(0, 0, 1);
+	
+	float x = (screen_pos.x * 2 - 1);
+	float y = (screen_pos.y * 2 - 1);
+	float z = sqrt(1 - x * x / 2 - y * y / 2);
+	float longitude = 2 * atan((sqrt(2.0) * z * x)/(2 * z * z - 1));
+	float latitude = asin(sqrt(2.0) * z * y);
+	
+	if (x*x + y*y > 1) {
+		//discard;					// Doesn't work
+		return vec3(0, 0, 0); 		//TODO set to black, now everyting outside reflects sky color
+	}
+	
+	view_dir.y = -sin(latitude)*view_dir.z;
+	view_dir.z = cos(latitude)*view_dir.z;
+	
+	view_dir.x = sin(longitude)*view_dir.z;
+	view_dir.z = cos(longitude)*view_dir.z;
+	
+	return view_dir * distance;
+}
+
+
 // ---------- Temporal Filtering: Ray Direction to Screen Position ----------
 bool projection_view_to_screen(vec3 view_pos, out vec2 screen_pos, out float distance, bool previous)
 {
@@ -334,23 +388,23 @@ bool projection_view_to_screen(vec3 view_pos, out vec2 screen_pos, out float dis
 	float aspect = global_ubo.projection_aspect_ratio;
 	float fov = global_ubo.pt_projection_fov * M_PI/180;		// Convert to radians
 
-	if (projection_type > 3) 		// Replace by direct access to "pt_projection" console variable (not global, have to figure out of to access)
-		{ projection_type = 1; }
-	
 	switch(projection_type)
 	{
-	case 0:	// Rectilinear
+	default:
+	case 0:
 		return rectilinear_forward(view_pos, screen_pos, distance, previous);
-	case 1:	// Cylindrical
+	case 1:
 		return cylindrical_forward(view_pos, screen_pos, distance, previous);
 	case 2:
 		return equirectangular_forward(view_pos, screen_pos, distance);
 	case 3:
 		return mercator_forward(view_pos, screen_pos, distance);
-//	case 4:
-//		return hammer();
+	case 4:
+		return stereographic_forward(view_pos, screen_pos, distance);
 //	case 5:
 //		return panini();
+//	case 6:
+//		return hammer();
 	}
 }
 
@@ -373,9 +427,11 @@ vec3 projection_screen_to_view(vec2 screen_pos, float distance, bool previous)
 	case 3:
 		return mercator_reverse(screen_pos, distance);
 	case 4:
-		return hammer_reverse(screen_pos, distance);
+		return stereographic_reverse(screen_pos, distance);
 	case 5:
 		float scale = get_panini(0, radians(fovx)/2, 1).x;
 		return get_panini_reverse(screen_pos, scale, distance);
+	case 6:
+		return hammer_reverse(screen_pos, distance);
 	}
 }
