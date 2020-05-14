@@ -1,6 +1,9 @@
 # Quake II RTX - Advanced Projections Mod
 **Quake II RTX - Advanced Projections Mod** is a mod for [Q2RTX](https://github.com/NVIDIA/Q2RTX) that contains support for additional projection methods and larger field of view.
 
+Here is a video showing some of the features:
+https://youtu.be/aAJl7b4i_ic
+
 ## Added features:
  - **More camera projection:** Equirectangular, Mercator, Hammer, Panini, etc...
  - **Fixed DoF calculations:** Now correct in 3D space for large FOV (before DoF only in camera forward direction)
